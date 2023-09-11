@@ -1,0 +1,10 @@
+# Ignore all files in the "abaqus" folder
+abaqus/*
+*.mat
+
+# Except for these specific files
+!abaqus/NODEMM.f
+!abaqus/equi_strain.cae
+!abaqus/equi_strain.inp
+!abaqus/square.cae
+!abaqus/square.inp

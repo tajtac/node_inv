@@ -1,0 +1,2 @@
+makeRectangle(212, 42, 824, 872);
+run("Crop");
