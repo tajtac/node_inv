@@ -1,6 +1,8 @@
 # Ignore all files in the "abaqus" folder
 abaqus/*
 *.mat
+slurm*
+*.sh
 
 # Except for these specific files
 !abaqus/NODEMM.f

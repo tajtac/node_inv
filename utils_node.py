@@ -98,6 +98,22 @@ def NODE(y0, params, steps = 200):
     return out
 NODE_vmap = vmap(NODE, in_axes=(0, None), out_axes=0)
 
+@jit
+def RK_forwardpass(Y0, params):
+  n = 4
+  dt = 1.0/n
+  def RK_step(Y,t):
+    Y = jnp.array([Y])
+    k1 = common_forwardpass(Y               , params)
+    k2 = common_forwardpass(Y + 0.5*k1*dt   , params)
+    k3 = common_forwardpass(Y + 0.5*k2*dt   , params)
+    k4 = common_forwardpass(Y + k3*dt       , params)
+    Y = Y + 1/6*dt*(k1 + 2*k2 + 2*k3 + k4)
+    return (Y[0], None)
+  out, _ = scan(RK_step, Y0, jnp.linspace(0,1,n), length = n)
+  return out
+RK_vmap = vmap(RK_forwardpass, in_axes=(0, None), out_axes=0)
+
 # @jit
 # def NODE(y0, params):
 #     f = lambda y,t: common_forwardpass(jnp.array([y]), params)[0] # fake time argument for ODEint
@@ -130,6 +146,7 @@ class NODE_model(): #isotropic
     
 
 class NODE_model_aniso(): #anisotropic
+
     def __init__(self, params):
         NODE_weights, self.theta, self.Psi1_bias, self.Psi2_bias, self.alpha = params
         self.params_I1, self.params_I2, self.params_1_v, self.params_1_w, self.params_v_w = NODE_weights
@@ -138,18 +155,18 @@ class NODE_model_aniso(): #anisotropic
         I1 = I1-3.0
         Iv = Iv-1.0
         Iw = Iw-1.0
-        Psi_1 = NODE(I1, self.params_I1)
+        Psi_1 = RK_forwardpass(I1, self.params_I1)
         a = jax.nn.sigmoid(self.alpha[0])
-        Psi_v_1 = NODE(a*I1 + (1.0-a)*Iv, self.params_1_v)*a
+        Psi_v_1 = RK_forwardpass(a*I1 + (1.0-a)*Iv, self.params_1_v)*a
         Psi_v_1 = jnp.maximum(Psi_v_1, 0.0)
         a = jax.nn.sigmoid(self.alpha[1])
-        Psi_w_1 = NODE(a*I1 + (1.0-a)*Iw, self.params_1_w)*a
+        Psi_w_1 = RK_forwardpass(a*I1 + (1.0-a)*Iw, self.params_1_w)*a
         Psi_w_1 = jnp.maximum(Psi_w_1, 0.0)
         return Psi_1 + Psi_v_1 + Psi_w_1 + jnp.exp(self.Psi1_bias)
     
     def Psi2(self, I1, I2, Iv, Iw):
         I2 = I2-3.0
-        Psi_2 = NODE(I2, self.params_I2)
+        Psi_2 = RK_forwardpass(I2, self.params_I2)
         return Psi_2 + jnp.exp(self.Psi2_bias)
     
     def Psiv(self, I1, I2, Iv, Iw):
@@ -157,10 +174,10 @@ class NODE_model_aniso(): #anisotropic
         Iv = Iv-1.0
         Iw = Iw-1.0
         a = jax.nn.sigmoid(self.alpha[0])
-        Psi_1_v = NODE(a*I1 + (1.0-a)*Iv, self.params_1_v)*(1.0-a)
+        Psi_1_v = RK_forwardpass(a*I1 + (1.0-a)*Iv, self.params_1_v)*(1.0-a)
         Psi_1_v = jnp.maximum(Psi_1_v, 0.0)
         a = jax.nn.sigmoid(self.alpha[2])
-        Psi_w_v = NODE(a*Iv + (1.0-a)*Iw, self.params_v_w)*a
+        Psi_w_v = RK_forwardpass(a*Iv + (1.0-a)*Iw, self.params_v_w)*a
         Psi_w_v = jnp.maximum(Psi_w_v, 0.0)
         return Psi_1_v + Psi_w_v
     
@@ -169,9 +186,35 @@ class NODE_model_aniso(): #anisotropic
         Iv = Iv-1.0
         Iw = Iw-1.0
         a = jax.nn.sigmoid(self.alpha[1])
-        Psi_1_w = NODE(a*I1 + (1.0-a)*Iw, self.params_1_w)*(1.0-a)
+        Psi_1_w = RK_forwardpass(a*I1 + (1.0-a)*Iw, self.params_1_w)*(1.0-a)
         Psi_1_w = jnp.maximum(Psi_1_w, 0.0)
         a = jax.nn.sigmoid(self.alpha[2])
-        Psi_v_w = NODE(a*Iv + (1.0-a)*Iw, self.params_v_w)*(1.0-a)
+        Psi_v_w = RK_forwardpass(a*Iv + (1.0-a)*Iw, self.params_v_w)*(1.0-a)
         Psi_v_w = jnp.maximum(Psi_v_w, 0.0)
         return Psi_1_w + Psi_v_w
+
+class GOH_model(): #anisotropic
+    def __init__(self, params):
+        self.params = params
+    
+    def Psi1(self, I1, I2, Iv, Iw):
+        C10, k1, k2, kappa = self.params
+
+        E = kappa*(I1-3.0) + (1-3*kappa)*(Iv-1.0)
+        E = jnp.maximum(E, 0.0)
+        Psi1 = C10 + k1*kappa*E*jnp.exp(k2*E**2)
+        return Psi1
+    
+    def Psi2(self, I1, I2, Iv, Iw):
+        return 0.0
+    
+    def Psiv(self, I1, I2, Iv, Iw):
+        C10, k1, k2, kappa = self.params
+
+        E = kappa*(I1-3.0) + (1-3*kappa)*(Iv-1.0)
+        E = jnp.maximum(E, 0.0)
+        Psiv = k1*(1-3*kappa)*E*jnp.exp(k2*E**2)
+        return Psiv
+    
+    def Psiw(self, I1, I2, Iv, Iw):
+        return 0.0

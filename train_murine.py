@@ -21,7 +21,7 @@ from functools import partial
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from utils import train_jp, eval_Cauchy_aniso, eval_Cauchy_aniso_vmap, merge_weights_aniso
+from utils import train, eval_Cauchy_aniso, eval_Cauchy_aniso_vmap, merge_weights_aniso
 from utils_node import NODE, init_layers, NODE_model_aniso, init_params_aniso
 from fem import plotmesh, fe_solver_2D, vahid_anisohyper_inv, write_biax_abaqus_inp
 
@@ -69,14 +69,14 @@ _, unravel = ravel_pytree(node_params)
 
 # %%
 # Train with the heterogeneity
-ff_params = coord_2_strain_params[0]
-ff_nn2 = lambda x, nn_params: ff_nn(x, [ff_params, nn_params])
+# ff_params = coord_2_strain_params[0]
+# ff_nn2 = lambda x, nn_params: ff_nn(x, [ff_params, nn_params])
 def get_stresses(x, y, Lambda_params):
     epsx, epsy = ff_nn(jnp.array([x,y]), coord_2_strain_params).T
 
     # get NODE individual-specific params, phi, from the Lambda NN
     Lambda_inp = jnp.array([x,y]).reshape([-1,2])
-    phi = ff_nn2(Lambda_inp, Lambda_params).flatten()
+    phi = ff_nn(Lambda_inp, Lambda_params).flatten()
     # Make predictions with this NODE
     mymodel = NODE_model_aniso(unravel(phi))
     sgm = eval_Cauchy_aniso(epsx+1.0,epsy+1.0, mymodel)
@@ -122,7 +122,7 @@ def loss(Lambda_params, X_colloc):
     rgt_bd_frc, top_bd_frc, lft_bd_frc, bot_bd_frc = bd_forces(Lambda_params, None)
     a1 = 500.0
     a2 = 1.0
-    return a1*(div_x**2 + div_y**2) + a2*((rgt_bd_frc-Fx)**2 + (top_bd_frc-Fy)**2 + (lft_bd_frc-Fx)**2 + (bot_bd_frc-Fy)**2)
+    return a1*(div_x**2 + div_y**2)# + a2*((rgt_bd_frc-Fx)**2 + (top_bd_frc-Fy)**2 + (lft_bd_frc-Fx)**2 + (bot_bd_frc-Fy)**2)
 
 @partial(jit, static_argnums=(0,2,3,))
 def step(loss, i, get_params, opt_update, opt_state, X_batch):
@@ -135,7 +135,7 @@ def train(loss, X, get_params, opt_update, opt_state, key, nIter = 10000, print_
     metrics = []
     for it in range(nIter):
         key, subkey = random.split(key)
-        X_colloc = random.uniform(key, (500,2))
+        X_colloc = random.uniform(key, (5000,2))
         X_colloc = jax.device_put(X_colloc, sharding)
         opt_state = step(loss, it, get_params, opt_update, opt_state, X_colloc)
         if (it+1)% print_freq == 0:
@@ -152,10 +152,13 @@ def train(loss, X, get_params, opt_update, opt_state, key, nIter = 10000, print_
     return get_params(opt_state), val_loss, metrics
 
 sharding = PositionalSharding(jax.devices()).reshape(n_cores, 1)
-opt_init, opt_update, get_params = optimizers.adam(5.e-4) #Original: 5.e-4
+opt_init, opt_update, get_params = optimizers.adam(1.e-3) #Original: 5.e-4
 opt_state = opt_init(Lambda_params)
 Lambda_params, val_loss, metrics = train(loss, node_X, get_params, opt_update, opt_state, 
-                                              key, nIter = 250_000, print_freq=1000, metric_fns=[bd_forces, divergence])
+                                              key, nIter = 50_000, print_freq=1000, metric_fns=[bd_forces, divergence])
 with open('params/PU1_034_3_post.npy', 'wb') as f:
     pickle.dump([node_X, strains, Fx, Fy, node_params, Lambda_params, val_loss, metrics], f)
-write_biax_abaqus_inp(Lambda_params, ff_nn2, node_params, Fx, Fy, outputfile='abaqus/PU1_034_3.inp')
+
+lmx = 10868/9252 # = 1.1746
+lmy = 12077/10252 # = 1.1780
+write_biax_abaqus_inp(Lambda_params, ff_nn, node_params, lmx-1, lmy-1, outputfile='abaqus/PU1_034_3.inp', disp_or_force='disp', inputfile='abaqus/equi_strain.inp')

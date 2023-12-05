@@ -497,7 +497,7 @@ def write_biax_abaqus_inp(Lambda_params, Lambda_fn, common_params, Ax, Ay, outpu
     for i in range(len(nodes)):
         node = nodes[i]
         Lambda_inp = abq_node_X[i].reshape([-1,2])
-        phi = Lambda_fn(Lambda_inp, Lambda_params).flatten() #Lambda_fn is just nn_fpass
+        phi = Lambda_fn(Lambda_inp, Lambda_params).flatten()
 
         for j, param in enumerate(phi):
             part1 += "** Name: myfield-" + str(k) + "   Type: Field\n*Initial Conditions, type=FIELD, variable=" + \
@@ -507,3 +507,88 @@ def write_biax_abaqus_inp(Lambda_params, Lambda_fn, common_params, Ax, Ay, outpu
 
     with open(outputfile, 'w') as f:
         f.write(inptxt)
+
+
+
+def apply_bc_biax(node_X, lmx, lmy, l0=1.0, h0=1.0):
+    n_node = len(node_X)
+    node_x = np.zeros_like(node_X)
+    DOF_fmap = np.zeros((n_node,2),dtype=int)
+    dof = 0
+    for i in range(n_node):
+        X = node_X[i]
+        node_x[i] = node_X[i]
+        if X[0]<0.001 and X[1]<0.001: #lower left corner
+            DOF_fmap[i,0] = -1
+            DOF_fmap[i,1] = -1
+            node_x[i,0] = 0
+            node_x[i,1] = 0
+        elif X[0]>0.999*l0 and X[1]<0.001: #lower right corner
+            DOF_fmap[i,0] = -1
+            DOF_fmap[i,1] = -1
+            node_x[i,0] = lmx
+            node_x[i,1] = 0
+        elif X[0]>0.999*l0 and X[1]>0.999*h0: #upper right corner
+            DOF_fmap[i,0] = -1
+            DOF_fmap[i,1] = -1
+            node_x[i,0] = lmx
+            node_x[i,1] = lmy
+        elif X[0]<0.001 and X[1]>0.999*h0: #upper left corner
+            DOF_fmap[i,0] = -1
+            DOF_fmap[i,1] = -1
+            node_x[i,0] = 0
+            node_x[i,1] = lmy
+        elif X[0]<0.001: #The rest of the left boundary
+            DOF_fmap[i,0] = -1
+            node_x[i,0] = 0
+            DOF_fmap[i,1] = dof
+            dof+= 1
+        elif X[1]<0.001: #The rest of the lower boundary
+            DOF_fmap[i,1] = -1
+            node_x[i,1] = 0
+            DOF_fmap[i,0] = dof
+            dof+= 1
+        elif X[0]>0.999*l0: #The rest of the right boundary
+            DOF_fmap[i,0] = -1
+            node_x[i,0] = lmx
+            DOF_fmap[i,1] = dof
+            dof+= 1
+        elif X[1]>0.999*h0: #The rest of the upper boundary
+            DOF_fmap[i,1] = -1
+            node_x[i,1] = lmy
+            DOF_fmap[i,0] = dof
+            dof+= 1
+        else: #The rest of the domain
+            DOF_fmap[i,0] = dof
+            dof+=1
+            DOF_fmap[i,1] = dof
+            dof+=1
+    return node_x, DOF_fmap
+    
+def apply_bc_uniax_x(node_X, lmx):
+    n_node = len(node_X)
+    node_x = np.zeros_like(node_X)
+    DOF_fmap = np.zeros((n_node,2),dtype=int)
+    dof = 0
+    for i in range(n_node):
+        X = node_X[i]
+        node_x[i] = node_X[i]
+        if X[0]<0.001:
+            DOF_fmap[i,0] = -1
+            node_x[i,0] = 0
+            if X[1] < 0.001:
+                DOF_fmap[i,1] = -1
+                node_x[i,1] = 0
+            else:
+                DOF_fmap[i,1] = dof
+                dof+= 1
+        elif X[0]>0.999:
+            DOF_fmap[i,0] = -1
+            node_x[i,0] = lmx
+            DOF_fmap[i,1] = dof
+            dof+= 1
+        else:
+            DOF_fmap[i,0] = dof
+            DOF_fmap[i,1] = dof+1
+            dof+=2 
+    return node_x, DOF_fmap
