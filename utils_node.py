@@ -196,20 +196,21 @@ class NODE_model_aniso(): #anisotropic
 class GOH_model(): #anisotropic
     def __init__(self, params):
         self.params = params
+        self.theta = params[-1]
     
     def Psi1(self, I1, I2, Iv, Iw):
-        C10, k1, k2, kappa = self.params
+        C10, k1, k2, kappa, _ = self.params
 
         E = kappa*(I1-3.0) + (1-3*kappa)*(Iv-1.0)
         E = jnp.maximum(E, 0.0)
-        Psi1 = C10 + k1*kappa*E*jnp.exp(k2*E**2)
+        Psi1 = C10 + k1*kappa*E*jnp.exp(k2*E**2) + k1*kappa*E*jnp.exp(k2*E**2)
         return Psi1
     
     def Psi2(self, I1, I2, Iv, Iw):
         return 0.0
     
     def Psiv(self, I1, I2, Iv, Iw):
-        C10, k1, k2, kappa = self.params
+        C10, k1, k2, kappa, _ = self.params
 
         E = kappa*(I1-3.0) + (1-3*kappa)*(Iv-1.0)
         E = jnp.maximum(E, 0.0)
@@ -218,3 +219,70 @@ class GOH_model(): #anisotropic
     
     def Psiw(self, I1, I2, Iv, Iw):
         return 0.0
+    
+class HGO_model():
+    def __init__(self, params):
+        C10, k1_v, k1_w, k2_v, k2_w, theta = params
+        C10, k1_v, k1_w, k2_v, k2_w = jnp.exp(C10), jnp.exp(k1_v), jnp.exp(k1_w), jnp.exp(k2_v), jnp.exp(k2_w)
+        self.params = [C10, k1_v, k1_w, k2_v, k2_w, theta]
+        self.theta = params[-1]
+
+    def Psi1(self, I1, I2, Iv, Iw):
+        C10, k1_v, k1_w, k2_v, k2_w, theta = self.params
+        return C10
+    
+    def Psi2(self, I1, I2, Iv, Iw):
+        return 0.0
+    
+    def Psiv(self, I1, I2, Iv, Iw):
+        C10, k1_v, k1_w, k2_v, k2_w, theta = self.params
+        Iv = jnp.maximum(Iv, 1.0)
+        return k1_v*(Iv-1.0)*jnp.exp(k2_v*(Iv-1)**2)
+    
+    def Psiw(self, I1, I2, Iv, Iw):
+        C10, k1_v, k1_w, k2_v, k2_w, theta = self.params
+        Iw = jnp.maximum(Iw, 1.0)
+        return k1_w*(Iw-1.0)*jnp.exp(k2_w*(Iw-1)**2)
+
+class neohook_model():
+    def __init__(self, C10):
+        self.C10 = C10
+        self.theta = 0.0
+
+    def Psi1(self, I1, I2, Iv, Iw):
+        return self.C10
+    
+    def Psi2(self, I1, I2, Iv, Iw):
+        return 0.0
+    
+    def Psiv(self, I1, I2, Iv, Iw):
+        return 0.0
+    
+    def Psiw(self, I1, I2, Iv, Iw):
+        return 0.0
+
+
+
+def split_c_s_params(node_params):
+    NODE_weights, theta, Psi1_bias, Psi2_bias, alpha = node_params
+    params_I1, params_I2, params_1_v, params_1_w, params_v_w = NODE_weights
+    params_I1_common, params_I1_sample = params_I1
+    params_I2_common, params_I2_sample = params_I2
+    params_1_v_common, params_1_v_sample = params_1_v
+    params_1_w_common, params_1_w_sample = params_1_w
+    params_v_w_common, params_v_w_sample = params_v_w
+    sample_params = (params_I1_sample, params_I2_sample, params_1_v_sample, params_1_w_sample, params_v_w_sample, theta, Psi1_bias, Psi2_bias, alpha)
+    common_params = (params_I1_common, params_I2_common, params_1_v_common, params_1_w_common, params_v_w_common)
+    return common_params, sample_params
+
+def merge_c_s_params(common_params, sample_params):
+    params_I1_sample, params_I2_sample, params_1_v_sample, params_1_w_sample, params_v_w_sample, theta, Psi1_bias, Psi2_bias, alpha = sample_params
+    params_I1_common, params_I2_common, params_1_v_common, params_1_w_common, params_v_w_common = common_params
+    params_I1 = (params_I1_common, params_I1_sample)
+    params_I2 = (params_I2_common, params_I2_sample)
+    params_1_v = (params_1_v_common, params_1_v_sample)
+    params_1_w = (params_1_w_common, params_1_w_sample)
+    params_v_w = (params_v_w_common, params_v_w_sample)
+    NODE_weights = (params_I1, params_I2, params_1_v, params_1_w, params_v_w)
+    node_params = (NODE_weights, theta, Psi1_bias, Psi2_bias, alpha)
+    return node_params

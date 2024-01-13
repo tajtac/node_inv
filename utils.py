@@ -110,11 +110,13 @@ def train(loss, X, get_params, opt_update, opt_state, key, nIter = 10000, print_
         if batch_size is None:
             X_batch = X
         else:
-            X_batch = random.choice(key=key, a=X, shape=(batch_size,), replace=False)
+            # X_batch = random.choice(key=key, a=X, shape=(batch_size,), replace=False) # This is too slow when X is big
+            idx = random.randint(key, minval=0, maxval=len(X), shape=(batch_size,)) #This can have repeated values, but that is ok
+            X_batch = X[idx]
         opt_state = step(loss, it, get_params, opt_update, opt_state, X_batch, key)         
         if (it+1)% print_freq == 0:
             params = get_params(opt_state)
-            train_loss_value = loss(params, X, key)
+            train_loss_value = loss(params, X_batch, key)
             train_loss.append(train_loss_value)
             if metric_fns is not None:
                 m = []
@@ -169,8 +171,8 @@ def train_colloc_parallel(loss, inp, get_params, opt_update, opt_state, key, sha
         opt_state = step_colloc(loss, it, get_params, opt_update, opt_state, X)
         if (it+1)% print_freq == 0:
             params = get_params(opt_state)
-            with open('params/incr/'+fname+'_epoch_{}.npy'.format(it+1), 'wb') as f:
-                pickle.dump(params, f)
+            # with open('params/incr/'+fname+'_epoch_{}.npy'.format(it+1), 'wb') as f:
+            #     pickle.dump(params, f)
             val_loss_value = loss(params, [node_X_ext, t_hist[-1]])
             val_loss.append(val_loss_value)
             if metric_fns is not None:
@@ -199,6 +201,15 @@ def ff_nn(x, params): #ff: fourier features
     x = nn_fpass(x, nn_params)
     return x
 
+def coords_2_strain_nn(x, params):
+    ff_params, nn_params = params
+    x, t = x[:,:2], x[:,2:3]
+    x = jnp.matmul(x, ff_params)
+    x = jnp.hstack([jnp.sin(2*jnp.pi*x), jnp.cos(2*jnp.pi*x), t])
+
+    x = nn_fpass(x, nn_params)
+    return x
+
 def init_params_nn(layers, key):
   Ws = []
   bs = []
@@ -210,7 +221,7 @@ def init_params_nn(layers, key):
   return [Ws, bs]
 
 def get_stresses(x, y, t, Lambda_params, coord_2_strain_params, model):
-    epsx, epsy = ff_nn(jnp.array([x,y,t]), coord_2_strain_params).T
+    epsx, epsy = coords_2_strain_nn(jnp.array([x,y,t])[None,:], coord_2_strain_params).flatten()
 
     # get NODE individual-specific params, phi, from the Lambda NN
     Lambda_inp = jnp.array([x,y]).reshape([-1,2])
