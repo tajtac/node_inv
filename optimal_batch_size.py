@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from utils import train, eval_Cauchy_aniso, eval_Cauchy_aniso_vmap, merge_weights_aniso
-from utils_node import NODE, init_layers, NODE_model_aniso, init_params_aniso
+from utils_hyperelasticity import NODE, init_layers, NODE_model_aniso, init_params_aniso
 from fem import plotmesh, fe_solver_2D, vahid_anisohyper_inv, write_biax_abaqus_inp
 
 from jaxinterp2d import interp2d

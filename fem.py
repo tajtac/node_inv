@@ -348,11 +348,13 @@ class vahid_anisohyper_inv():
         return D
 
 
-def plotmesh(elements, node_X, c, title='mesh', ax=None, fig=None, cmap='Blues', cbar = True, cbar_frac=0.03):
+def plotmesh(elements, node_X, c, title='mesh', ax=None, fig=None, cmap='Blues', cbar = True, cbar_frac=0.03, extent = None, extend='neither'):
     n_elem = len(elements)
 
     if ax==None:
         fig, ax = plt.subplots(figsize=(15,7))
+    if extent is None:
+        extent = [np.min(c), np.max(c)]
 
     r = np.abs(np.max(node_X)-np.min(node_X))
     ax.set_xlim([np.min(node_X)-0.1*r, np.max(node_X)+0.1*r])
@@ -369,9 +371,9 @@ def plotmesh(elements, node_X, c, title='mesh', ax=None, fig=None, cmap='Blues',
     p = PatchCollection(patches, edgecolor='k', facecolor='gray')
     p.set_array(c)
     p.set_cmap(cmap)
-    p.set_clim([np.min(c),np.max(c)])
+    p.set_clim(extent)
     if cbar==True:
-        plt.colorbar(p,ax=ax, fraction = cbar_frac)
+        plt.colorbar(p, ax=ax, fraction = cbar_frac, extend=extend)
     ax.add_collection(p)
     ax.set_title(title)
     ax.axis('off') 
