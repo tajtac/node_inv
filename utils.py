@@ -148,13 +148,10 @@ def init_params_nn(layers, key):
 
 def get_P(X, Y, t, Lambda_params, coord_2_strain_params, model):
     F_xx, F_xy, F_yx, F_yy = coords_2_strain_nn(jnp.array([X,Y,t])[None,:], coord_2_strain_params).flatten()
-
     # get NODE individual-specific params, phi, from the Lambda NN
     Lambda_inp = jnp.array([X,Y]).reshape([-1,2])
     phi = ff_nn(Lambda_inp, Lambda_params).flatten()
     # Make predictions with this NODE
-    # mymodel = model(phi)
-    # P = eval_P(F_xx, F_xy, F_yx, F_yy, mymodel)
     ugrad = jnp.array([[F_xx-1.0, F_xy],[F_yx, F_yy-1.0]])
     P = ThreeDElasticity(model).ugrad_2_P(ugrad, phi, 2)
     return P[0,0], P[1,0], P[0,1], P[1,1]
@@ -173,15 +170,15 @@ Grad_Pyy_Y = vmap(grad(get_Pyy, argnums=1), in_axes=(0,0,0,None,None,None), out_
 @partial(jit, static_argnums=(4,))
 def bd_forces(Lambda_params, t, bd_X, c2s_params, model):
     rgt_bd_X, top_bd_X, lft_bd_X, bot_bd_X = bd_X
-    rgt_bd_sgm = get_P_vmap(rgt_bd_X[:,0], rgt_bd_X[:,1], t*jnp.ones_like(rgt_bd_X[:,0]), Lambda_params, c2s_params, model)
-    top_bd_sgm = get_P_vmap(top_bd_X[:,0], top_bd_X[:,1], t*jnp.ones_like(top_bd_X[:,0]), Lambda_params, c2s_params, model)
-    lft_bd_sgm = get_P_vmap(lft_bd_X[:,0], lft_bd_X[:,1], t*jnp.ones_like(lft_bd_X[:,0]), Lambda_params, c2s_params, model)
-    bot_bd_sgm = get_P_vmap(bot_bd_X[:,0], bot_bd_X[:,1], t*jnp.ones_like(bot_bd_X[:,0]), Lambda_params, c2s_params, model)
+    rgt_bd_P = get_P_vmap(rgt_bd_X[:,0], rgt_bd_X[:,1], t*jnp.ones_like(rgt_bd_X[:,0]), Lambda_params, c2s_params, model)
+    top_bd_P = get_P_vmap(top_bd_X[:,0], top_bd_X[:,1], t*jnp.ones_like(top_bd_X[:,0]), Lambda_params, c2s_params, model)
+    lft_bd_P = get_P_vmap(lft_bd_X[:,0], lft_bd_X[:,1], t*jnp.ones_like(lft_bd_X[:,0]), Lambda_params, c2s_params, model)
+    bot_bd_P = get_P_vmap(bot_bd_X[:,0], bot_bd_X[:,1], t*jnp.ones_like(bot_bd_X[:,0]), Lambda_params, c2s_params, model)
 
-    rgt_bd_frc = jnp.sum(rgt_bd_sgm[0]) # Assume area of edge = 1.0
-    top_bd_frc = jnp.sum(top_bd_sgm[3])
-    lft_bd_frc = jnp.sum(lft_bd_sgm[0])
-    bot_bd_frc = jnp.sum(bot_bd_sgm[3])
+    rgt_bd_frc = jnp.sum(rgt_bd_P[0]*1.0) # Assume area of edge = 1.0
+    top_bd_frc = jnp.sum(top_bd_P[3]*1.0)
+    lft_bd_frc = jnp.sum(lft_bd_P[0]*1.0)
+    bot_bd_frc = jnp.sum(bot_bd_P[3]*1.0)
     return rgt_bd_frc, top_bd_frc, lft_bd_frc, bot_bd_frc
 
 @partial(jit, static_argnums=(3,))
