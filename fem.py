@@ -348,7 +348,7 @@ class vahid_anisohyper_inv():
         return D
 
 
-def plotmesh(elements, node_X, c, title='mesh', ax=None, fig=None, cmap='Blues', cbar = True, cbar_frac=0.03, extent = None, extend='neither'):
+def plotmesh(elements, node_X, c, title='mesh', ax=None, fig=None, cmap='Blues', cbar = True, cbar_frac=0.03, extent = None, extend='neither', ec='k'):
     n_elem = len(elements)
 
     if ax==None:
@@ -368,7 +368,7 @@ def plotmesh(elements, node_X, c, title='mesh', ax=None, fig=None, cmap='Blues',
         n4 = elements[i,3]
         polygon = Polygon([node_X[n1],node_X[n2],node_X[n3],node_X[n4]], edgecolor='r', facecolor=None, closed=True)
         patches.append(polygon)
-    p = PatchCollection(patches, edgecolor='k', facecolor='gray')
+    p = PatchCollection(patches, edgecolor=ec, facecolor='gray')
     p.set_array(c)
     p.set_cmap(cmap)
     p.set_clim(extent)
