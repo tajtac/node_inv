@@ -95,7 +95,7 @@ def train_colloc_parallel(loss, inp, get_params, opt_update, opt_state, key, sha
         XYt_colloc = jax.device_put(XYt_colloc, sharding)
         # X = [XYt_colloc, random.choice(key, t_hist)]
         opt_state = step_colloc(loss, it, get_params, opt_update, opt_state, XYt_colloc)
-        if (it+1)% print_freq == 0:
+        if (it)% print_freq == 0:
             params = get_params(opt_state)
             # with open('params/incr/'+fname+'_epoch_{}.npy'.format(it+1), 'wb') as f:
             #     pickle.dump(params, f)
