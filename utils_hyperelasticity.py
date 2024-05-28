@@ -246,7 +246,7 @@ class HGO_model():
 
 class neohook_model():
     def __init__(self, C10):
-        self.C10 = C10
+        self.C10 = jnp.exp(C10)
         self.theta = 0.0
 
     def Psi1(self, I1, I2, Iv, Iw):
