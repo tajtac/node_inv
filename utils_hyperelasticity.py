@@ -28,7 +28,7 @@ def init_layers(layers, key):
         Ws.append(random.normal(subkey, (layers[i], layers[i + 1]))*std_glorot)
     return Ws
 
-def init_params(common_layers, sample_layers, key):
+def init_params_iso(common_layers, sample_layers, key):
     params_I1_common = init_layers(common_layers, key)
     params_I1_sample = init_layers(sample_layers, key)
     params_I2_common = init_layers(common_layers, key)
@@ -121,12 +121,13 @@ RK_vmap = vmap(RK_forwardpass, in_axes=(0, None), out_axes=0)
 # NODE_vmap = vmap(NODE, in_axes=(0, None), out_axes=0)
 
 
-class NODE_model(): #isotropic
+class NODE_model_iso(): #isotropic
     def __init__(self, params):
         NODE_weights, self.Psi1_bias, self.Psi2_bias = params
         self.params_I1, self.params_I2 = NODE_weights
+        self.theta = 0.0
         
-    def Psi1(self, I1, I2):
+    def Psi1(self, I1, I2, Iv, Iw):
         I1 = I1-3.0
         I2 = I2-3.0
         Psi_1 = NODE(I1, self.params_I1)
@@ -135,7 +136,7 @@ class NODE_model(): #isotropic
         Psi_1_2 = a = 0.0
         return Psi_1 + a*Psi_1_2 + jnp.exp(self.Psi1_bias)
     
-    def Psi2(self, I1, I2):
+    def Psi2(self, I1, I2, Iv, Iw):
         I1 = I1-3.0
         I2 = I2-3.0
         Psi_2 = NODE(I2, self.params_I2)
@@ -143,6 +144,11 @@ class NODE_model(): #isotropic
         # Psi_1_2 = NODE(a*I1 + (1.0-a)*I2, self.params_1_2)
         Psi_1_2 = a = 0.0
         return Psi_2 + (1.0-a)*Psi_1_2 + jnp.exp(self.Psi2_bias)
+    
+    def Psiv(self, I1, I2, Iv, Iw):
+        return 0.0
+    def Psiw(self, I1, I2, Iv, Iw):
+        return 0.0
     
 
 class NODE_model_aniso(): #anisotropic
@@ -262,8 +268,25 @@ class neohook_model():
         return 0.0
 
 
+def split_c_s_params_iso(node_params):
+    NODE_weights, Psi1_bias, Psi2_bias = node_params
+    params_I1, params_I2 = NODE_weights
+    params_I1_common, params_I1_sample = params_I1
+    params_I2_common, params_I2_sample = params_I2
+    sample_params = (params_I1_sample, params_I2_sample, Psi1_bias, Psi2_bias)
+    common_params = (params_I1_common, params_I2_common)
+    return common_params, sample_params
 
-def split_c_s_params(node_params):
+def merge_c_s_params_iso(common_params, sample_params):
+    params_I1_sample, params_I2_sample, Psi1_bias, Psi2_bias = sample_params
+    params_I1_common, params_I2_common = common_params
+    params_I1 = (params_I1_common, params_I1_sample)
+    params_I2 = (params_I2_common, params_I2_sample)
+    NODE_weights = (params_I1, params_I2)
+    node_params = (NODE_weights, Psi1_bias, Psi2_bias)
+    return node_params
+
+def split_c_s_params_aniso(node_params):
     NODE_weights, theta, Psi1_bias, Psi2_bias, alpha = node_params
     params_I1, params_I2, params_1_v, params_1_w, params_v_w = NODE_weights
     params_I1_common, params_I1_sample = params_I1
@@ -275,7 +298,7 @@ def split_c_s_params(node_params):
     common_params = (params_I1_common, params_I2_common, params_1_v_common, params_1_w_common, params_v_w_common)
     return common_params, sample_params
 
-def merge_c_s_params(common_params, sample_params):
+def merge_c_s_params_aniso(common_params, sample_params):
     params_I1_sample, params_I2_sample, params_1_v_sample, params_1_w_sample, params_v_w_sample, theta, Psi1_bias, Psi2_bias, alpha = sample_params
     params_I1_common, params_I2_common, params_1_v_common, params_1_w_common, params_v_w_common = common_params
     params_I1 = (params_I1_common, params_I1_sample)
