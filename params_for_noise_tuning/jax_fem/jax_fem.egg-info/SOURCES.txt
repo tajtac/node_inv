@@ -1,0 +1,11 @@
+LICENSE
+MANIFEST.in
+README.md
+VERSION
+pyproject.toml
+setup.cfg
+jax_fem/jax_fem.egg-info/PKG-INFO
+jax_fem/jax_fem.egg-info/SOURCES.txt
+jax_fem/jax_fem.egg-info/dependency_links.txt
+jax_fem/jax_fem.egg-info/top_level.txt
+tests/test_autodiff_jvp_wrapper.py

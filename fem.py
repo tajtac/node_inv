@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from matplotlib.collections import PatchCollection
+from matplotlib.colors import LinearSegmentedColormap
 from jax.flatten_util import ravel_pytree
 
 class fe_solver_2D():
@@ -355,6 +356,36 @@ def plotmesh(elements, node_X, c, title='mesh', ax=None, fig=None, cmap='Blues',
         fig, ax = plt.subplots(figsize=(15,7))
     if extent is None:
         extent = [np.min(c), np.max(c)]
+
+    r = np.abs(np.max(node_X)-np.min(node_X))
+    ax.set_xlim([np.min(node_X)-0.1*r, np.max(node_X)+0.1*r])
+    ax.set_ylim([np.min(node_X)-0.1*r, np.max(node_X)+0.1*r])
+    ax.set_aspect('equal')
+    patches=[]
+    for i in range(n_elem):
+        n1 = elements[i,0]
+        n2 = elements[i,1]
+        n3 = elements[i,2]
+        n4 = elements[i,3]
+        polygon = Polygon([node_X[n1],node_X[n2],node_X[n3],node_X[n4]], edgecolor='r', facecolor=None, closed=True)
+        patches.append(polygon)
+    p = PatchCollection(patches, edgecolor=ec, facecolor='gray')
+    p.set_array(c)
+    p.set_cmap(cmap)
+    p.set_clim(extent)
+    if cbar==True:
+        plt.colorbar(p, ax=ax, fraction = cbar_frac, extend=extend)
+    ax.add_collection(p)
+    ax.set_title(title)
+    ax.axis('off') 
+    return fig, ax
+def plotmesh_updated(elements, node_X, c, c_min,c_max,title='mesh', ax=None, fig=None, cmap='Blues', cbar = True, cbar_frac=0.03, extent = None, extend='neither', ec='k'):
+    n_elem = len(elements)
+
+    if ax==None:
+        fig, ax = plt.subplots(figsize=(15,7))
+    if extent is None:
+        extent = [c_min, c_max]
 
     r = np.abs(np.max(node_X)-np.min(node_X))
     ax.set_xlim([np.min(node_X)-0.1*r, np.max(node_X)+0.1*r])

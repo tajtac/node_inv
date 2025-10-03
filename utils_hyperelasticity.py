@@ -10,11 +10,11 @@ import jax.example_libraries.optimizers as optimizers
 from jax.scipy.optimize import minimize
 from jax.lax import scan
 from jax.nn import softplus
-from jax.config import config
+from jax import config
 from jax.flatten_util import ravel_pytree
 
 config.update("jax_enable_x64", True)
-from jax.experimental.host_callback import id_print
+# from jax.experimental.host_callback import id_print
 rng = random.PRNGKey(2022)
 import scipy
 
@@ -70,6 +70,25 @@ def init_params_aniso(common_layers, sample_layers, key):
     Psi2_bias = -5.0
     alpha = [0.0, 0.0, 0.0]
     return (NODE_weights, theta, Psi1_bias, Psi2_bias, alpha)
+def init_params_aniso_ablation(common_layers, sample_layers, key):
+    params_I1= init_layers(common_layers, key)
+    params_I2= init_layers(common_layers, key)
+    params_1_v= init_layers(common_layers, key)
+    params_1_w= init_layers(common_layers, key)
+    params_v_w= init_layers(common_layers, key)
+
+    params_I1 = params_I1
+    params_I2 = params_I2
+    params_1_v =params_1_v
+    params_1_w =params_1_w
+    params_v_w =params_v_w
+    NODE_weights = (params_I1, params_I2, params_1_v, params_1_w, params_v_w)
+
+    theta = 0.5
+    Psi1_bias = -5.0
+    Psi2_bias = -5.0
+    alpha = [0.0, 0.0, 0.0]
+    return (NODE_weights, theta, Psi1_bias, Psi2_bias, alpha)
 
 @jit
 def forward_pass(H, Ws):
@@ -108,6 +127,22 @@ def RK_forwardpass(Y0, params):
     k2 = common_forwardpass(Y + 0.5*k1*dt   , params)
     k3 = common_forwardpass(Y + 0.5*k2*dt   , params)
     k4 = common_forwardpass(Y + k3*dt       , params)
+    Y = Y + 1/6*dt*(k1 + 2*k2 + 2*k3 + k4)
+    return (Y[0], None)
+  out, _ = scan(RK_step, Y0, jnp.linspace(0,1,n), length = n)
+  return out
+RK_vmap = vmap(RK_forwardpass, in_axes=(0, None), out_axes=0)
+
+@jit
+def RK_forwardpass_ablation(Y0, params):
+  n = 4
+  dt = 1.0/n
+  def RK_step(Y,t):
+    Y = jnp.array([Y])
+    k1 = forward_pass(Y               , params)
+    k2 = forward_pass(Y + 0.5*k1*dt   , params)
+    k3 = forward_pass(Y + 0.5*k2*dt   , params)
+    k4 = forward_pass(Y + k3*dt       , params)
     Y = Y + 1/6*dt*(k1 + 2*k2 + 2*k3 + k4)
     return (Y[0], None)
   out, _ = scan(RK_step, Y0, jnp.linspace(0,1,n), length = n)
@@ -198,6 +233,53 @@ class NODE_model_aniso(): #anisotropic
         Psi_v_w = RK_forwardpass(a*Iv + (1.0-a)*Iw, self.params_v_w)*(1.0-a)
         Psi_v_w = jnp.maximum(Psi_v_w, 0.0)
         return Psi_1_w + Psi_v_w
+class NODE_model_aniso_ablation(): #anisotropic
+
+    def __init__(self, params):
+        NODE_weights, self.theta, self.Psi1_bias, self.Psi2_bias, self.alpha = params
+        self.params_I1, self.params_I2, self.params_1_v, self.params_1_w, self.params_v_w = NODE_weights
+    
+    def Psi1(self, I1, I2, Iv, Iw):
+        I1 = I1-3.0
+        Iv = Iv-1.0
+        Iw = Iw-1.0
+        Psi_1 = RK_forwardpass_ablation(I1, self.params_I1)
+        a = jax.nn.sigmoid(self.alpha[0])
+        Psi_v_1 = RK_forwardpass_ablation(a*I1 + (1.0-a)*Iv, self.params_1_v)*a
+        Psi_v_1 = jnp.maximum(Psi_v_1, 0.0)
+        a = jax.nn.sigmoid(self.alpha[1])
+        Psi_w_1 = RK_forwardpass_ablation(a*I1 + (1.0-a)*Iw, self.params_1_w)*a
+        Psi_w_1 = jnp.maximum(Psi_w_1, 0.0)
+        return Psi_1 + Psi_v_1 + Psi_w_1 + jnp.exp(self.Psi1_bias)
+    
+    def Psi2(self, I1, I2, Iv, Iw):
+        I2 = I2-3.0
+        Psi_2 = RK_forwardpass_ablation(I2, self.params_I2)
+        return Psi_2 + jnp.exp(self.Psi2_bias)
+    
+    def Psiv(self, I1, I2, Iv, Iw):
+        I1 = I1-3.0
+        Iv = Iv-1.0
+        Iw = Iw-1.0
+        a = jax.nn.sigmoid(self.alpha[0])
+        Psi_1_v = RK_forwardpass_ablation(a*I1 + (1.0-a)*Iv, self.params_1_v)*(1.0-a)
+        Psi_1_v = jnp.maximum(Psi_1_v, 0.0)
+        a = jax.nn.sigmoid(self.alpha[2])
+        Psi_w_v = RK_forwardpass_ablation(a*Iv + (1.0-a)*Iw, self.params_v_w)*a
+        Psi_w_v = jnp.maximum(Psi_w_v, 0.0)
+        return Psi_1_v + Psi_w_v
+    
+    def Psiw(self, I1, I2, Iv, Iw):
+        I1 = I1-3.0
+        Iv = Iv-1.0
+        Iw = Iw-1.0
+        a = jax.nn.sigmoid(self.alpha[1])
+        Psi_1_w = RK_forwardpass_ablation(a*I1 + (1.0-a)*Iw, self.params_1_w)*(1.0-a)
+        Psi_1_w = jnp.maximum(Psi_1_w, 0.0)
+        a = jax.nn.sigmoid(self.alpha[2])
+        Psi_v_w = RK_forwardpass_ablation(a*Iv + (1.0-a)*Iw, self.params_v_w)*(1.0-a)
+        Psi_v_w = jnp.maximum(Psi_v_w, 0.0)
+        return Psi_1_w + Psi_v_w
 
 class GOH_model(): #anisotropic
     def __init__(self, params):
@@ -256,7 +338,7 @@ class neohook_model():
         self.theta = 0.0
 
     def Psi1(self, I1, I2, Iv, Iw):
-        return self.C10
+        return self.C10[0]
     
     def Psi2(self, I1, I2, Iv, Iw):
         return 0.0

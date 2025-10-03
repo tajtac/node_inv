@@ -9,7 +9,7 @@ import jax.example_libraries.optimizers as optimizers
 from jax.scipy.optimize import minimize
 from jax.lax import scan
 from jax.nn import softplus
-from jax.config import config
+from jax import config
 from jax.flatten_util import ravel_pytree
 
 from utils_hyperelasticity import eval_P, ThreeDElasticity
@@ -60,6 +60,11 @@ def step_colloc(loss, i, get_params, opt_update, opt_state, X_batch):
     g = grad(loss)(params, X_batch)
     return opt_update(i, g, opt_state)
 
+@partial(jit, static_argnums=(0,2,3,))
+def step_colloc_weak(loss, i, get_params, opt_update, opt_state, X_batch,spatial_temporal_address):
+    params = get_params(opt_state)
+    g = grad(loss)(params, X_batch,spatial_temporal_address)
+    return opt_update(i, g, opt_state)
 def train_colloc(loss, X, get_params, opt_update, opt_state, key, fname, nIter = 10000, print_freq=1000, metric_fns=None):
     val_loss = []
     metrics = []
@@ -93,14 +98,55 @@ def train_colloc_parallel(loss, inp, get_params, opt_update, opt_state, key, sha
         t_colloc = random.choice(key, t_hist, (batch_size,1))
         XYt_colloc = jnp.hstack([XY_colloc, t_colloc])
         XYt_colloc = jax.device_put(XYt_colloc, sharding)
-        # X = [XYt_colloc, random.choice(key, t_hist)]
+        X = [XYt_colloc, random.choice(key, t_hist)]
         opt_state = step_colloc(loss, it, get_params, opt_update, opt_state, XYt_colloc)
         if (it)% print_freq == 0:
             params = get_params(opt_state)
-            # with open('params/incr/'+fname+'_epoch_{}.npy'.format(it+1), 'wb') as f:
-            #     pickle.dump(params, f)
+            with open('params/incr/'+fname+'_epoch_{}.npy'.format(it+1), 'wb') as f:
+                pickle.dump(params, f)
             val_loss_value = loss(params, node_X_ext)
             val_loss.append(val_loss_value)
+            if metric_fns is not None:
+                m = []
+                for metric_fn in metric_fns:
+                    m.append(metric_fn(params, node_X_ext))
+                metrics.append(m)
+            to_print = "it {}, val loss = {:e}".format(it+1, val_loss_value)
+            print(to_print)
+    return get_params(opt_state), val_loss, metrics
+
+def train_colloc_parallel_weak(loss, inp, get_params, opt_update, opt_state, key, sharding, fname, nIter = 10000, print_freq=1000, metric_fns=None, batch_size=10000):
+    node_X, t_hist = inp
+    Nx = node_X.shape[0]
+    Nt = t_hist.shape[0]
+
+    XY_rep = jnp.tile(node_X, (Nt, 1))  
+
+    t_repeat = jnp.repeat(t_hist, Nx)  
+    t_repeat = t_repeat[:, None]        
+
+    XYt = jnp.hstack([XY_rep, t_repeat])
+    node_X_ext = jnp.hstack([node_X, t_hist[-1]*np.ones_like(node_X[:,:1])]) #append a row consisting of t_hist[-1]
+    val_loss = []
+    metrics = []
+    for it in range(nIter):
+        key, subkey = random.split(key)
+        total_points= Nx * Nt
+        row_idx = random.randint(subkey, (batch_size,), 0, total_points)
+        XYt_colloc = XYt[row_idx]
+        spatial_idx = row_idx % Nx 
+        t_idx = row_idx // Nx 
+        spatial_temporal_address=jnp.stack([spatial_idx, t_idx], axis=1)
+        XYt_colloc = jax.device_put(XYt_colloc, sharding)
+        opt_state = step_colloc_weak(loss, it, get_params, opt_update, opt_state, XYt_colloc,spatial_temporal_address)
+        if (it)% print_freq == 0:
+            params = get_params(opt_state)
+            spatial_idx_full = jnp.arange(Nx)
+            t_idx_full = jnp.full((Nx,), Nt-1)
+            addr_val = jnp.stack([spatial_idx_full, t_idx_full], axis=1)
+            node_X_ext = jnp.hstack([node_X, t_hist[-1]*jnp.ones((Nx,1))])
+            val_loss_value = loss(params, node_X_ext, addr_val)
+            val_loss.append(val_loss_value) 
             if metric_fns is not None:
                 m = []
                 for metric_fn in metric_fns:
@@ -135,6 +181,16 @@ def coords_2_strain_nn(x, params):
 
     x = nn_fpass(x, nn_params)
     return x
+def coords_2_strain_nn_vmap(x, params):
+    ff_params, nn_params = params
+    x1=x[0]
+    x2=x[1]
+    t=x[2]
+    x=jnp.hstack((x1,x2))
+    x = jnp.matmul(x, ff_params)
+    x = jnp.hstack([jnp.sin(2*jnp.pi*x), jnp.cos(2*jnp.pi*x), t])
+    x = nn_fpass(x, nn_params)
+    return x
 
 def init_params_nn(layers, key):
   Ws = []
@@ -148,6 +204,28 @@ def init_params_nn(layers, key):
 
 def get_P(X, Y, t, Lambda_params, coord_2_strain_params, model):
     F_xx, F_xy, F_yx, F_yy = coords_2_strain_nn(jnp.array([X,Y,t])[None,:], coord_2_strain_params).flatten()
+    # get NODE individual-specific params, phi, from the Lambda NN
+    Lambda_inp = jnp.array([X,Y]).reshape([-1,2])
+    phi = ff_nn(Lambda_inp, Lambda_params).flatten()
+    # Make predictions with this NODE
+    ugrad = jnp.array([[F_xx-1.0, F_xy],[F_yx, F_yy-1.0]])
+    P = ThreeDElasticity(model).ugrad_2_P(ugrad, phi, 2)
+    return P[0,0], P[1,0], P[0,1], P[1,1]
+def get_P_from_dis(X, Y, t, Lambda_params, coord_2_displacement_params, model):
+    ux=lambda X_,Y_,t_:coords_2_strain_nn(jnp.array([X,Y,t])[None,:], coord_2_displacement_params)[0]
+    uy=lambda X_,Y_,t_:coords_2_strain_nn(jnp.array([X,Y,t])[None,:], coord_2_displacement_params)[1]
+    
+
+    du1_dx1 =grad(ux, argnums=0)
+    du1_dx2 =grad(ux, argnums=1)
+    du2_dx1 =grad(uy, argnums=0)
+    du2_dx2 =grad(uy, argnums=1)
+    
+    F_xx=du1_dx1(X,Y,t)+1
+    F_xy=du1_dx2(X,Y,t)
+    F_yx=du2_dx1(X,Y,t)
+    F_yy=du2_dx2(X,Y,t)+1
+    #F_xx, F_xy, F_yx, F_yy = coords_2_strain_nn(jnp.array([X,Y,t])[None,:], coord_2_strain_params).flatten()
     # get NODE individual-specific params, phi, from the Lambda NN
     Lambda_inp = jnp.array([X,Y]).reshape([-1,2])
     phi = ff_nn(Lambda_inp, Lambda_params).flatten()

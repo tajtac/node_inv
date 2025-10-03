@@ -1,0 +1,13 @@
+#!/bin/bash
+
+
+# Show this ran on a compute node by running the hostname command.
+hostname
+
+
+cd /scratch/gilbreth/aamirihe/Newfolder
+module load anaconda
+
+source activate /scratch/gilbreth/aamirihe/Newfolder
+
+python example.py
