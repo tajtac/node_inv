@@ -10,3 +10,5 @@ slurm*
 !abaqus/equi_strain.inp
 !abaqus/square.cae
 !abaqus/square.inp
+purde_prob_highres_post.npy
+params_purdue_pre_highres.npy
